@@ -35,7 +35,9 @@ if PROXY:
 
 def get_filesizeMB(url):
     # 可以添加返回文件类型功能
-    resp = httpx.head(url, proxies=PROXY)
+    proxies = PROXY or None
+
+    resp = httpx.head(url, proxies=proxies)
 
     if 'content-length' in resp.headers:
         length = int(resp.headers['content-length'])
@@ -154,6 +156,10 @@ async def preprocess_message(message: ImageDB) -> List[str]:
 async def send_message_and_update_db(bot: Bot, chat_id: str, message: ImageDB):
     """包装发送消息方法并更新数据库"""
     img_list = await preprocess_message(message)
+    
+    # 图片超过 60 张直接退出（避免消息太长出错）
+    if len(img_list) > 60:
+        return
 
     original_site = message.original_site
     original_id = message.original_id
