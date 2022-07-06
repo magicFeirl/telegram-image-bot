@@ -35,7 +35,9 @@ if PROXY:
 
 def get_filesizeMB(url):
     # 可以添加返回文件类型功能
-    resp = httpx.head(url, proxies=PROXY)
+    proxies = PROXY or None
+
+    resp = httpx.head(url, proxies=proxies)
 
     if 'content-length' in resp.headers:
         length = int(resp.headers['content-length'])
