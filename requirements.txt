@@ -1,0 +1,11 @@
+# pre
+python-telegram-bot==20.0a2
+aiohttp
+python-dotenv
+pytz
+lxml
+xmltodict
+tortoise-orm
+pydantic
+tweepy
+pixivpy-async
