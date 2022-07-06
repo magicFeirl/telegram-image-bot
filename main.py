@@ -27,8 +27,10 @@ FILE_MAX_SIZE = 50
 HTTP_FILE_MAXSIZE = 5
 PER_MESSAGE_MAX_IMAGE_COUNT = 10
 
-os.environ['HTTP_PROXY'] = PROXY
-os.environ['HTTPS_PROXY'] = PROXY
+
+if PROXY:
+    os.environ['HTTP_PROXY'] = PROXY
+    os.environ['HTTPS_PROXY'] = PROXY
 
 
 def get_filesizeMB(url):
