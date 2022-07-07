@@ -139,9 +139,32 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
         # 重发思路：
         # 先发送一次消息，成功，发下一条
         # 失败，不断尝试发送 n 次，直到发送成功
+
+        async def retry_send_message(exstr):
+            # 分块发送的时候判断是否为 BadRequest
+            # 如果遇到 wrong file 或者 wrong type 的异常，直接发送原消息并提示
+            errors = ['wrong file', 'wrong type']
+
+            if filter(lambda e: exstr.find(e) != -1, errors):
+                # 潜在bug：如果 downlod = true list 内容为 bytes
+                img_list: List[str] = [
+                    media.media for media in media_list_section]  # type: ignore
+
+                try:
+                    logger.info('发送图片失败，尝试下载后发送')
+                    await send_message(bot, chat_id, str(message), img_list, download=not download)
+                except Exception as e:
+                    logger.error('下载失败 %s' % e)
+                    message_with_error = str(
+                        message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
+
+                    await send_message(bot, chat_id, message_with_error)
+
         try:
             await bot.send_media_group(**params)
             sended = True
+        except BadRequest as e:
+            await retry_send_message(str(e))
         except RetryAfter as e:
             retry = 1
             await asyncio.sleep(e.retry_after)
@@ -156,29 +179,10 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
                     retry += 1
                     await asyncio.sleep(e.retry_after)
                 except BadRequest as e:
-                    # 分块发送的时候判断是否为 BadRequest
-                    # 如果遇到 wrong file 或者 wrong type 的异常，直接发送原消息并提示
-                    exstr = str(e)
-                    errors = ['wrong file', 'wrong type']
-
-                    if filter(lambda e: exstr.find(e) != -1, errors):
-                        # 潜在bug：如果 downlod = true list 内容为 bytes
-                        img_list: List[str] = [
-                            media.media for media in media_list_section]  # type: ignore
-
-                        try:
-                            logger.info('发送图片失败，尝试下载后发送')
-
-                            await send_message(bot, chat_id, str(message), img_list, download=not download)
-                        except Exception as e:
-                            reason = 'bad request: download failed'
-                            logger.error('下载失败 %s' % e)
-                            message_with_error = str(
-                                message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
-
-                            await send_message(bot, chat_id, message_with_error)
+                    await retry_send_message(str(e))
 
     return sended
+
 
 async def preprocess_message(message: ImageDB) -> List[str]:
     """预处理数据库数据
