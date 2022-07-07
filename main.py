@@ -171,7 +171,7 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
             retry = 1
             await asyncio.sleep(e.retry_after)
 
-            while retry <= 5:
+            while retry <= 5 and not sended:
                 try:
                     logger.info('send message failed, retry %s' % retry)
                     await bot.send_media_group(**params)
