@@ -150,6 +150,7 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
                     break
                 except RetryAfter as e:
                     retry += 1
+                    await asyncio.sleep(e.retry_after)
 
 
 async def preprocess_message(message: ImageDB) -> List[str]:
