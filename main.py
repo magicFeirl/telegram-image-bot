@@ -128,13 +128,17 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
         return
 
     for media_list_section in get_media_list(media_list, message, document, download):
-        cron = bot.send_media_group(chat_id, media_list_section, **timeout)
 
+        params = {
+            'chat_id': chat_id,
+            'media': media_list_section,
+            **timeout
+        }
         # 重发思路：
         # 先发送一次消息，成功，发下一条
         # 失败，不断尝试发送 n 次，直到发送成功
         try:
-            await cron
+            await bot.send_media_group(**params)
         except RetryAfter as e:
             retry = 1
             await asyncio.sleep(e.retry_after)
@@ -142,7 +146,7 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
             while retry <= 5:
                 try:
                     logger.info('send message failed, retry %s' % retry)
-                    await cron
+                    await bot.send_media_group(**params)
                     break
                 except RetryAfter as e:
                     retry += 1
