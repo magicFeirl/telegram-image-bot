@@ -107,6 +107,7 @@ def get_media_list(urls: List[str], caption, document=False, download=False):
 
     media_method = InputMediaDocument if (
         document or filesize_exceed) else InputMediaPhoto
+
     media_list = list(map(lambda _: media_method(**_), media_list))
 
     # 最多同时只能上传十张图片
@@ -115,7 +116,7 @@ def get_media_list(urls: List[str], caption, document=False, download=False):
 
 
 async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[List[str]] = None, document=False, download=False):
-    """发送消息"""
+    """发送消息，多块消息只要有一个被发送成功则视整个消息发送成功"""
     timeout = {
         'read_timeout': 30,
         'write_timeout': 30,
@@ -123,12 +124,13 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
         'pool_timeout': 30
     }
 
+    sended = False
+
     if not media_list:
         await bot.send_message(chat_id, message)
-        return
+        return True
 
     for media_list_section in get_media_list(media_list, message, document, download):
-
         params = {
             'chat_id': chat_id,
             'media': media_list_section,
@@ -139,6 +141,7 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
         # 失败，不断尝试发送 n 次，直到发送成功
         try:
             await bot.send_media_group(**params)
+            sended = True
         except RetryAfter as e:
             retry = 1
             await asyncio.sleep(e.retry_after)
@@ -147,11 +150,35 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
                 try:
                     logger.info('send message failed, retry %s' % retry)
                     await bot.send_media_group(**params)
+                    sended = True
                     break
                 except RetryAfter as e:
                     retry += 1
                     await asyncio.sleep(e.retry_after)
+                except BadRequest as e:
+                    # 分块发送的时候判断是否为 BadRequest
+                    # 如果遇到 wrong file 或者 wrong type 的异常，直接发送原消息并提示
+                    exstr = str(e)
+                    errors = ['wrong file', 'wrong type']
 
+                    if filter(lambda e: exstr.find(e) != -1, errors):
+                        # 潜在bug：如果 downlod = true list 内容为 bytes
+                        img_list: List[str] = [
+                            media.media for media in media_list_section]  # type: ignore
+
+                        try:
+                            logger.info('发送图片失败，尝试下载后发送')
+
+                            await send_message(bot, chat_id, str(message), img_list, download=not download)
+                        except Exception as e:
+                            reason = 'bad request: download failed'
+                            logger.error('下载失败 %s' % e)
+                            message_with_error = str(
+                                message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
+
+                            await send_message(bot, chat_id, message_with_error)
+
+    return sended
 
 async def preprocess_message(message: ImageDB) -> List[str]:
     """预处理数据库数据
@@ -190,28 +217,9 @@ async def send_message_and_update_db(bot: Bot, chat_id: str, message: ImageDB):
     reason = ''
 
     try:
-        await send_message(bot, chat_id, str(message), img_list)
-        sended = True
+        sended = await send_message(bot, chat_id, str(message), img_list)
     except TimedOut:
         reason = 'time out'
-    except BadRequest as e:
-        # 如果遇到 wrong file 或者 wrong type 的异常，直接发送原消息并提示
-        exstr = str(e)
-        errors = ['wrong file', 'wrong type']
-
-        if filter(lambda e: exstr.find(e) != -1, errors):
-            try:
-                logger.info('发送图片失败，尝试下载后发送')
-                await send_message(bot, chat_id, str(message), img_list, download=True)
-                sended = True
-            except Exception as e:
-                reason = 'bad request: download failed'
-                logger.error('下载失败 %s' % e)
-                message_with_error = str(
-                    message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
-
-                await send_message(bot, chat_id, message_with_error)
-                await orm.update(retry=MESSAGE_MAX_RETRY, send_successed=False, reason='wrong file, fatual error.')
 
     if sended:
         await orm.update(retry=F('retry') + 1, send_successed=True, reason='')
