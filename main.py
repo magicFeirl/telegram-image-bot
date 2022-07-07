@@ -180,6 +180,9 @@ async def send_message_and_update_db(bot: Bot, chat_id: str, message: ImageDB):
     orm = ImageDB.filter(
         original_site=original_site, original_id=original_id)
 
+    # 发送时标记该消息已被发送
+    await orm.update(send_successed=True)
+
     logger.info(f'{original_site} {original_id} 开始发送')
 
     sended = False
@@ -214,7 +217,7 @@ async def send_message_and_update_db(bot: Bot, chat_id: str, message: ImageDB):
         logger.info('发送成功')
     else:
         logger.info(reason)
-        await orm.update(retry=F('retry') + 1, reason=reason)
+        await orm.update(retry=F('retry') + 1, send_successed=False, reason=reason)
 
     print()
 
