@@ -1,8 +1,6 @@
 """
 运行全部爬虫，入库数据
 """
-import logging
-
 import asyncio
 
 from tortoise import Tortoise
@@ -11,10 +9,6 @@ from app.gelbooru import run as run_gel
 from app.nico import run as run_nico
 from app.pixiv import run as run_pixiv
 from app.twitter import run as run_twitter
-
-
-logging.basicConfig(filename='crawler.log', format='%(message)s | %(levelname)s at %(asctime)s | %(pathname)s %(funcName)s:%(lineno)d',
-                    datefmt='%Y/%m/%d %H:%M:%S')
 
 
 async def init_db():

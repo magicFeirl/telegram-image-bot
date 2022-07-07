@@ -1,10 +1,10 @@
-import logging
+# import logging
 from typing import List, Optional
 
-import xmltodict
 from aiohttp import ClientSession, TCPConnector
 from lxml.html import fromstring
 
+# logging.Logger = 
 
 def get_id(sid: str):
     if sid.startswith('im'):
@@ -64,7 +64,7 @@ class NSCrawler():
 
             return [item.replace('/seiga/im', '') for item in es.xpath(im_xpath)]
         except Exception as e:
-            logging.error(f'[NICO] {tags} 请求第 {pn} 页数据出错:', e)
+            # logging.error(f'[NICO] {tags} 请求第 {pn} 页数据出错:', e)
             return []
 
     async def get_many_pages(self, tags: str, begin: int, end: int):
@@ -87,7 +87,7 @@ class NSCrawler():
         json_data = await self.request(api)
 
         if 'errors' in json_data:
-            logging.error('[NICO]%s 请求图片信息出错: %s', id, json_data['errors'])
+            # logging.error('[NICO]%s 请求图片信息出错: %s', id, json_data['errors'])
             return []
 
         return json_data['target_image']
@@ -112,8 +112,7 @@ class NSCrawler():
         json_data = await self.request(api)
 
         if 'errors' in json_data:
-            logging.error('[NICO]%s 请求 tag list 失败: %s',
-                          id, json_data['errors'])
+            # logging.error('[NICO]%s 请求 tag list 失败: %s', id, json_data['errors'])
             return []
 
         return json_data['tag_list']
