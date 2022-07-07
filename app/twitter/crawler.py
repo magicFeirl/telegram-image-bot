@@ -87,8 +87,9 @@ class TwitterListCrawler(object):
 
     def get_timeline(self, list_id: str, count=200, pages=1, include_rts=False, only_img=True):
         """获取 count 条列表时间线数据，支持翻页"""
-        os.environ['http_proxy'] = self.proxy
-        os.environ['https_proxy'] = self.proxy
+        if self.proxy:
+            os.environ['http_proxy'] = self.proxy
+            os.environ['https_proxy'] = self.proxy
 
         auth = tweepy.OAuthHandler(self.api_key, self.api_key_secret)
         auth.set_access_token(self.access_token, self.access_secret)
