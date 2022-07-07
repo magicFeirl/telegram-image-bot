@@ -141,7 +141,6 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
         # 失败，不断尝试发送 n 次，直到发送成功
 
         async def retry_send_message(exstr):
-            global sended
             # 分块发送的时候判断是否为 BadRequest
             # 如果遇到 wrong file 或者 wrong type 的异常，直接发送原消息并提示
             errors = ['wrong file', 'wrong type']
@@ -154,7 +153,6 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
                 try:
                     logger.info('发送图片失败，尝试下载后发送')
                     await send_message(bot, chat_id, str(message), img_list, download=not download)
-                    sended = True
                 except Exception as e:
                     logger.error('下载失败 %s' % e)
                     message_with_error = str(
@@ -167,6 +165,7 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
             sended = True
         except BadRequest as e:
             await retry_send_message(str(e))
+            sended = True
         except RetryAfter as e:
             retry = 1
             await asyncio.sleep(e.retry_after)
@@ -182,6 +181,8 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
                     await asyncio.sleep(e.retry_after)
                 except BadRequest as e:
                     await retry_send_message(str(e))
+                    sended = True
+                    break
 
     return sended
 
