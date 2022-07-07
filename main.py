@@ -4,8 +4,6 @@ import os
 from typing import List, Optional
 
 import httpx
-
-import telegram
 from telegram import Bot, InputMediaDocument, InputMediaPhoto
 from telegram.error import BadRequest, RetryAfter, TimedOut
 from tortoise import run_async
@@ -18,8 +16,13 @@ from app.pixiv.config import PIXIV_REVERSE_PROXY
 from config import *
 from run_crawlers import init_db
 
+
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
+
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 # 发现 tg 有提供常量...
@@ -36,8 +39,11 @@ if PROXY:
 def get_filesizeMB(url):
     # 可以添加返回文件类型功能
     proxies = PROXY or None
-
-    resp = httpx.head(url, proxies=proxies)
+    try:
+        resp = httpx.head(url, proxies=proxies)
+    except TimeoutError:
+        logger.error('获取文件大小请求超时')
+        return -1
 
     if 'content-length' in resp.headers:
         length = int(resp.headers['content-length'])
@@ -46,7 +52,11 @@ def get_filesizeMB(url):
         return -1
 
 
-def get_media_list(urls: List[str], caption, document=False):
+def download_media(url: str):
+    return httpx.get(url).read()
+
+
+def get_media_list(urls: List[str], caption, document=False, download=False):
     """获取 PhotoMediaList 或者 DocumentMediaList
     当所有文件大小 < 5MB 时，全为 PhotoMedia
     当有文件大小 >= 5MB 且 < 50 MB 时，全为 DocumentMedia
@@ -57,7 +67,7 @@ def get_media_list(urls: List[str], caption, document=False):
     filesize_exceed = False
     filesize_exceed_max = False
 
-    for idx, img in enumerate(urls):
+    for idx, url in enumerate(urls):
         # 仅一个 caption 或者 11n 个 caption 设置标题
         title = None
         # idx = 0, true; idx = 10, true, idx = 20, true; ...
@@ -73,7 +83,7 @@ def get_media_list(urls: List[str], caption, document=False):
         if (document or filesize_exceed) and not filesize_exceed_max:
             filesize = -1
         else:
-            filesize = get_filesizeMB(img)
+            filesize = get_filesizeMB(url)
 
         # 判断文件大小是否能够通过 http 方法发送
         # 更新：因为两种类型不能 mix up，所以一旦有大小超限的数据就直接用 Document 类型
@@ -83,6 +93,10 @@ def get_media_list(urls: List[str], caption, document=False):
         elif filesize >= FILE_MAX_SIZE:  # 文件大小超过 50MB，跳过该文件
             filesize_exceed_max = True
             continue
+
+        img = url
+        if download:
+            img = download_media(url)
 
         media = {
             'media': img,
@@ -100,7 +114,7 @@ def get_media_list(urls: List[str], caption, document=False):
         yield media_list[idx:idx+PER_MESSAGE_MAX_IMAGE_COUNT]
 
 
-async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[List[str]] = None, document=False):
+async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[List[str]] = None, document=False, download=False):
     """发送消息"""
     timeout = {
         'read_timeout': 30,
@@ -113,29 +127,25 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
         await bot.send_message(chat_id, message)
         return
 
-    failed = []
+    for media_list_section in get_media_list(media_list, message, document, download):
+        cron = bot.send_media_group(chat_id, media_list_section, **timeout)
 
-    for media_list_section in get_media_list(media_list, message, document):
+        # 重发思路：
+        # 先发送一次消息，成功，发下一条
+        # 失败，不断尝试发送 n 次，直到发送成功
         try:
-            await bot.send_media_group(chat_id, media_list_section, **timeout)
+            await cron
         except RetryAfter as e:
-            failed.append(media_list_section)
+            retry = 1
             await asyncio.sleep(e.retry_after)
 
-    retry = 1
-    while retry <= 5 and failed:
-        print('retry', retry)
-        media_list_section = failed[-1]
-
-        try:
-            await bot.send_media_group(chat_id, media_list_section, **timeout)
-            failed.pop()
-        except RetryAfter as e:
-            delay = e.retry_after
-            print(f'limition exceeded, delay: {delay}s')
-            await asyncio.sleep(delay)
-
-        retry += 1
+            while retry <= 5:
+                try:
+                    logger.info('send message failed, retry %s' % retry)
+                    await cron
+                    break
+                except RetryAfter as e:
+                    retry += 1
 
 
 async def preprocess_message(message: ImageDB) -> List[str]:
@@ -156,7 +166,7 @@ async def preprocess_message(message: ImageDB) -> List[str]:
 async def send_message_and_update_db(bot: Bot, chat_id: str, message: ImageDB):
     """包装发送消息方法并更新数据库"""
     img_list = await preprocess_message(message)
-    
+
     # 图片超过 60 张直接退出（避免消息太长出错）
     if len(img_list) > 60:
         return
@@ -166,41 +176,54 @@ async def send_message_and_update_db(bot: Bot, chat_id: str, message: ImageDB):
     orm = ImageDB.filter(
         original_site=original_site, original_id=original_id)
 
-    print(original_site, original_id, '开始发送')
+    logger.info(f'{original_site} {original_id} 开始发送')
 
     sended = False
     reason = ''
 
     try:
-        await send_message(bot, '-609419368', str(message), img_list)
-        await orm.update(retry=F('retry') + 1, send_successed=True, reason='')
+        await send_message(bot, chat_id, str(message), img_list)
         sended = True
-        print('发送成功')
     except TimedOut:
         reason = 'time out'
     except BadRequest as e:
-        reason = 'bad request'
         # 如果遇到 wrong file 或者 wrong type 的异常，直接发送原消息并提示
         exstr = str(e)
         errors = ['wrong file', 'wrong type']
 
         if filter(lambda e: exstr.find(e) != -1, errors):
-            message_with_error = str(
-                message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
+            try:
+                logger.info('发送图片失败，尝试下载后发送')
+                await send_message(bot, chat_id, str(message), img_list, download=True)
+                sended = True
+            except Exception as e:
+                reason = 'bad request: download failed'
+                logger.error('下载失败 %s' % e)
+                message_with_error = str(
+                    message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
 
-            await send_message(bot, '-609419368', message_with_error)
-            await orm.update(retry=MESSAGE_MAX_RETRY, send_successed=False, reason='wrong file, fatual error.')
+                await send_message(bot, chat_id, message_with_error)
+                await orm.update(retry=MESSAGE_MAX_RETRY, send_successed=False, reason='wrong file, fatual error.')
 
-    if not sended:
-        print(reason)
+    if sended:
+        await orm.update(retry=F('retry') + 1, send_successed=True, reason='')
+        logger.info('发送成功')
+    else:
+        logger.info(reason)
         await orm.update(retry=F('retry') + 1, reason=reason)
+
+    print()
 
 
 async def main():
+    logger.info('开始启动推送程序...')
+
     await init_db()
-    bot = telegram.Bot(TOKEN)
+    bot = Bot(TOKEN)
 
     async with bot:
+        logger.info('启动完成！')
+
         async for message in ImageDB.filter(send_successed=False, retry__lt=MESSAGE_MAX_RETRY):
             for chat_id in CHAD_ID_LIST:
                 await send_message_and_update_db(bot, chat_id, message)
