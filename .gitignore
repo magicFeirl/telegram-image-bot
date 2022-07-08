@@ -5,3 +5,5 @@ test*.py
 *.sqlite3-shm
 *.sqlite3-wal
 *.out
+config.py
+**/config.py
