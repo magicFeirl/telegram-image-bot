@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Union
+import imghdr
 
 import httpx
-from telegram import Bot, InputMediaDocument, InputMediaPhoto
+from telegram import Bot, InputMediaDocument, InputMediaPhoto, InputFile
 from telegram.error import BadRequest, RetryAfter, TimedOut
 from tortoise import run_async
 from tortoise.expressions import F
@@ -36,7 +37,7 @@ if PROXY:
     os.environ['HTTPS_PROXY'] = PROXY
 
 
-def get_filesizeMB(url):
+def get_filesizeMB(url: str):
     # 可以添加返回文件类型功能
     proxies = PROXY or None
     try:
@@ -52,11 +53,22 @@ def get_filesizeMB(url):
         return -1
 
 
+def get_file_size_type(url: str):
+    filesize = get_filesizeMB(url)
+
+    if filesize < HTTP_FILE_MAXSIZE:
+        return 'photo'
+    elif filesize > HTTP_FILE_MAXSIZE and filesize < FILE_MAX_SIZE:
+        return 'document'
+    elif filesize >= FILE_MAX_SIZE:
+        return 'exceed'
+
+
 def download_media(url: str):
     return httpx.get(url, timeout=30).read()
 
 
-def get_media_list(urls: List[str], caption, document=False, download=False):
+def get_media_list(urls: List[str], caption):
     """获取 PhotoMediaList 或者 DocumentMediaList
     当所有文件大小 < 5MB 时，全为 PhotoMedia
     当有文件大小 >= 5MB 且 < 50 MB 时，全为 DocumentMedia
@@ -64,8 +76,7 @@ def get_media_list(urls: List[str], caption, document=False, download=False):
     """
     media_list = []
     section = 1
-    filesize_exceed = False
-    filesize_exceed_max = False
+    document = False
 
     for idx, url in enumerate(urls):
         # 仅一个 caption 或者 11n 个 caption 设置标题
@@ -78,46 +89,38 @@ def get_media_list(urls: List[str], caption, document=False, download=False):
                 title = title + '\n\n' + f'SECTION: {section}'
                 section += 1
 
-        # 如果只发送 document 形式的图片，不获取文件大小
-        # 如果之前文件大小超过 50MB，这张图片强制获取大小
-        if (document or filesize_exceed) and not filesize_exceed_max:
-            filesize = -1
-        else:
-            filesize = get_filesizeMB(url)
+        ft = get_file_size_type(url)
 
-        # 判断文件大小是否能够通过 http 方法发送
-        # 更新：因为两种类型不能 mix up，所以一旦有大小超限的数据就直接用 Document 类型
-        if filesize > HTTP_FILE_MAXSIZE and filesize < FILE_MAX_SIZE:
-            filesize_exceed = True
-            filesize_exceed_max = False
-        elif filesize >= FILE_MAX_SIZE:  # 文件大小超过 50MB，跳过该文件
-            filesize_exceed_max = True
+        if ft == 'exceed':
             continue
+        elif ft == 'document':
+            document = True
 
-        img = url
-        if download:
-            img = download_media(url)
+        filename = None
+
+        if document:
+            filename = url[url.rfind('/') + 1:]
 
         media = {
-            'media': img,
-            'caption': title
+            'media': url,
+            'caption': title,
+            'filename': filename
         }
 
         media_list.append(media)
 
-    media_method = InputMediaDocument if (
-        document or filesize_exceed) else InputMediaPhoto
+    media_method = InputMediaDocument if document else InputMediaPhoto
 
-    media_list = list(map(lambda _: media_method(**_), media_list))
+    def List2InputMedia(li):
+        return media_method(**li)
 
-    # 最多同时只能上传十张图片
+    media_list = list(map(List2InputMedia, media_list))
+
     for idx in range(0, len(media_list), PER_MESSAGE_MAX_IMAGE_COUNT):
         yield media_list[idx:idx+PER_MESSAGE_MAX_IMAGE_COUNT]
 
 
-async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[List[str]] = None, document=False, download=False):
-    """发送消息，多块消息只要有一个被发送成功则视整个消息发送成功"""
-
+async def do_send_message(bot: Bot, chat_id: str, photos, retry=1):
     timeout = {
         'read_timeout': 30,
         'write_timeout': 30,
@@ -125,45 +128,60 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
         'pool_timeout': 30
     }
 
-    async def do_send_message(media_list, retry=0):
-        params = {
-            'chat_id': chat_id,
-            'media': media_list,
-            **timeout
-        }
+    if retry > 6:
+        return
 
-        try:
-            await bot.send_media_group(**params)
-        except RetryAfter as e:
-            after = e.retry_after
-            logger.info('发送消息过于频繁，将于 %s 秒后进行第 %s 尝试' % (after, retry))
-            await asyncio.sleep(after)
-            await do_send_message(media_list, retry + 1)
-        except BadRequest as e:
-            exstr = str(e)
-            errors = ['wrong file', 'wrong type']
+    try:
+        await bot.send_media_group(chat_id, photos, **timeout)  # type: ignore
+    except RetryAfter as e:
+        after = e.retry_after
+        logger.info('发送消息过于频繁，将于 %s 秒后进行第 %s 尝试' % (after, retry))
+        await asyncio.sleep(after)
+        await do_send_message(bot, chat_id, photos, retry + 1)
+    except BadRequest as e:
+        exstr = str(e)
+        errors = ['wrong file', 'wrong type', 'photo_invalid_dimensions']
 
-            logger.info('发送图片失败，尝试下载后发送')
+        logger.info('Bad Request %s', e)
 
-            if filter(lambda e: exstr.find(e) != -1, errors):
-                # 潜在bug：如果 downlod = true list 内容为 bytes
-                img_list: List[str] = [media.media for media in media_list]
-                try:
-                    await send_message(bot, chat_id, str(message), img_list, download=not download)
-                except Exception as e:
-                    logger.error('下载图片失败 %s' % e)
+        if list(filter(lambda e: exstr.find(e) != -1, errors)):
+            downloaded_photos = []
+            logger.info('发送图片失败，尝试下载后发送 %s', retry)
 
-                    message_with_error = str(
-                        message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
+            for photo in photos:
+                obj = photo.media
+                caption = photo.caption
+                media_obj = None
+                filename = None
 
-                    await send_message(bot, chat_id, message_with_error)
+                if isinstance(photo.media, str):
+                    url = photo.media
+                    obj = download_media(photo.media)
+                    filename = url[url.rfind('/') + 1:]
+                elif isinstance(photo.media, bytes):
+                    filename = 'wth.' + str(imghdr.what('', photo.media))
 
-    if not media_list:
+                if isinstance(photo, InputMediaDocument) or exstr.find('photo_invalid_dimensions') != -1:
+                    # filename arg doesn't work
+                    media_obj = InputMediaDocument(obj, caption=caption)
+                elif isinstance(photo, InputMediaPhoto):
+                    media_obj = InputMediaPhoto(obj, caption=caption)
+
+                if media_obj:
+                    downloaded_photos.append(media_obj)
+
+            await do_send_message(bot, chat_id, downloaded_photos, retry + 1)
+
+
+async def send_message(bot: Bot, chat_id, message: str, urls: Optional[List[str]] = None, document=False, download=False):
+    """发送消息，多块消息只要有一个被发送成功则视整个消息发送成功"""
+
+    if not urls:
         await bot.send_message(chat_id, message)
         return
 
-    for media_list_section in get_media_list(media_list, message, document, download):
-        await do_send_message(media_list_section)
+    for data in get_media_list(urls, message):
+        await do_send_message(bot, chat_id, data)
 
 
 async def preprocess_message(message: ImageDB) -> List[str]:
@@ -208,7 +226,7 @@ async def send_message_and_update_db(bot: Bot, chat_id: str, message: ImageDB):
 
     if reason:
         await orm.update(retry=F('retry') + 1, send_successed=False, reason=reason)
-        logger.info('发送失败:', reason)
+        logger.info('发送失败: %s', reason)
     else:
         await orm.update(retry=F('retry') + 1, send_successed=True, reason='')
         logger.info('发送成功')
