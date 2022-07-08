@@ -171,7 +171,8 @@ async def do_send_message(bot: Bot, chat_id: str, photos, retry=1):
                     downloaded_photos.append(media_obj)
 
             await do_send_message(bot, chat_id, downloaded_photos, retry + 1)
-
+        else:
+            raise
 
 async def send_message(bot: Bot, chat_id, message: str, urls: Optional[List[str]] = None, document=False, download=False):
     """发送消息，多块消息只要有一个被发送成功则视整个消息发送成功"""
@@ -181,8 +182,14 @@ async def send_message(bot: Bot, chat_id, message: str, urls: Optional[List[str]
         return
 
     for data in get_media_list(urls, message):
-        await do_send_message(bot, chat_id, data)
+        try:
+            await do_send_message(bot, chat_id, data)
+        except Exception as e:
+            logger.error('下载失败 %s' % e)
+            message_with_error = str(
+                message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
 
+            await bot.send_message(chat_id, message_with_error)
 
 async def preprocess_message(message: ImageDB) -> List[str]:
     """预处理数据库数据
