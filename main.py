@@ -53,7 +53,7 @@ def get_filesizeMB(url):
 
 
 def download_media(url: str):
-    return httpx.get(url).read()
+    return httpx.get(url, timeout=30).read()
 
 
 def get_media_list(urls: List[str], caption, document=False, download=False):
@@ -117,6 +117,7 @@ def get_media_list(urls: List[str], caption, document=False, download=False):
 
 async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[List[str]] = None, document=False, download=False):
     """发送消息，多块消息只要有一个被发送成功则视整个消息发送成功"""
+
     timeout = {
         'read_timeout': 30,
         'write_timeout': 30,
@@ -124,67 +125,45 @@ async def send_message(bot: Bot, chat_id, message: str, media_list: Optional[Lis
         'pool_timeout': 30
     }
 
-    sended = False
-
-    if not media_list:
-        await bot.send_message(chat_id, message)
-        return True
-
-    for media_list_section in get_media_list(media_list, message, document, download):
+    async def do_send_message(media_list, retry=0):
         params = {
             'chat_id': chat_id,
-            'media': media_list_section,
+            'media': media_list,
             **timeout
         }
-        # 重发思路：
-        # 先发送一次消息，成功，发下一条
-        # 失败，不断尝试发送 n 次，直到发送成功
 
-        async def retry_send_message(exstr):
-            # 分块发送的时候判断是否为 BadRequest
-            # 如果遇到 wrong file 或者 wrong type 的异常，直接发送原消息并提示
+        try:
+            await bot.send_media_group(**params)
+        except RetryAfter as e:
+            after = e.retry_after
+            logger.info('发送消息过于频繁，将于 %s 秒后进行第 %s 尝试' % (after, retry))
+            await asyncio.sleep(after)
+            await do_send_message(media_list, retry + 1)
+        except BadRequest as e:
+            exstr = str(e)
             errors = ['wrong file', 'wrong type']
+
+            logger.info('发送图片失败，尝试下载后发送')
 
             if filter(lambda e: exstr.find(e) != -1, errors):
                 # 潜在bug：如果 downlod = true list 内容为 bytes
-                img_list: List[str] = [
-                    media.media for media in media_list_section]  # type: ignore
-
+                img_list: List[str] = [media.media for media in media_list]
                 try:
-                    logger.info('发送图片失败，尝试下载后发送')
                     await send_message(bot, chat_id, str(message), img_list, download=not download)
                 except Exception as e:
-                    logger.error('下载失败 %s' % e)
+                    logger.error('下载图片失败 %s' % e)
+
                     message_with_error = str(
                         message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(img_list)
 
                     await send_message(bot, chat_id, message_with_error)
 
-        try:
-            await bot.send_media_group(**params)
-            sended = True
-        except BadRequest as e:
-            await retry_send_message(str(e))
-            sended = True
-        except RetryAfter as e:
-            retry = 1
-            await asyncio.sleep(e.retry_after)
+    if not media_list:
+        await bot.send_message(chat_id, message)
+        return
 
-            while retry <= 5 and not sended:
-                try:
-                    logger.info('send message failed, retry %s' % retry)
-                    await bot.send_media_group(**params)
-                    sended = True
-                    break
-                except RetryAfter as e:
-                    retry += 1
-                    await asyncio.sleep(e.retry_after)
-                except BadRequest as e:
-                    await retry_send_message(str(e))
-                    sended = True
-                    break
-
-    return sended
+    for media_list_section in get_media_list(media_list, message, document, download):
+        await do_send_message(media_list_section)
 
 
 async def preprocess_message(message: ImageDB) -> List[str]:
@@ -220,20 +199,19 @@ async def send_message_and_update_db(bot: Bot, chat_id: str, message: ImageDB):
 
     logger.info(f'{original_site} {original_id} 开始发送')
 
-    sended = False
     reason = ''
 
     try:
-        sended = await send_message(bot, chat_id, str(message), img_list)
+        await send_message(bot, chat_id, str(message), img_list)
     except TimedOut:
         reason = 'time out'
 
-    if sended:
+    if reason:
+        await orm.update(retry=F('retry') + 1, send_successed=False, reason=reason)
+        logger.info('发送失败:', reason)
+    else:
         await orm.update(retry=F('retry') + 1, send_successed=True, reason='')
         logger.info('发送成功')
-    else:
-        logger.info(reason)
-        await orm.update(retry=F('retry') + 1, send_successed=False, reason=reason)
 
     print()
 
