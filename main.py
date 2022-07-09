@@ -120,7 +120,7 @@ def get_media_list(urls: List[str], caption):
         yield media_list[idx:idx+PER_MESSAGE_MAX_IMAGE_COUNT]
 
 
-async def do_send_message(bot: Bot, chat_id: str, photos, reply_message_id=None, retry=1):
+async def do_send_message(bot: Bot, chat_id: str, photos, reply_message_id: int = None, retry=1):
     timeout = {
         'read_timeout': 30,
         'write_timeout': 30,
@@ -141,7 +141,8 @@ async def do_send_message(bot: Bot, chat_id: str, photos, reply_message_id=None,
         return await do_send_message(bot, chat_id, photos, reply_message_id, retry + 1)
     except BadRequest as e:
         exstr = str(e)
-        errors = ['wrong file', 'wrong type', 'photo_invalid_dimensions']
+        errors = ['wrong file', 'wrong type',
+                  'photo_invalid_dimensions', 'failed to get http url content']
 
         logger.info('Bad Request %s', e)
 
@@ -192,12 +193,12 @@ async def send_message(bot: Bot, chat_id, message: str, urls: Optional[List[str]
         except Exception as e:
             logger.error('下载失败 %s' % e)
             message_with_error = str(
-                message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(urls) + '\n' + str(e)
+                message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(urls) + '\n\n' + str(e)
 
             msg_objs = await bot.send_message(chat_id, message_with_error)
 
             if msg_objs:
-                reply_message_id = msg_objs[0].id
+                reply_message_id = msg_objs.id
 
 
 async def preprocess_message(message: ImageDB) -> List[str]:
