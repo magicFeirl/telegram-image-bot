@@ -192,7 +192,7 @@ async def send_message(bot: Bot, chat_id, message: str, urls: Optional[List[str]
         except Exception as e:
             logger.error('下载失败 %s' % e)
             message_with_error = str(
-                message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(urls)
+                message) + '\n\n发送图片失败: TG 无法处理图片 URL，请点击下面的链接访问原图。\n' + '\n'.join(urls) + '\n' + str(e)
 
             msg_objs = await bot.send_message(chat_id, message_with_error)
 
