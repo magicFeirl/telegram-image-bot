@@ -16,7 +16,7 @@ class ImageDB(models.Model):
     reason = fields.CharField(max_length=50, default='')
 
     def __str__(self):
-        return f'{self.content}\n\n{ self.send_at}'
+        return f'{self.content}'
 
     def __repr__(self):
         return f'{self.content}\n\n{self.original_site} - {self.original_id}\n{ self.send_at}\n{self.send_successed}'
