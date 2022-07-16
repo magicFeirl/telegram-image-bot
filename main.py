@@ -29,6 +29,7 @@ logger.setLevel(logging.INFO)
 # 发现 tg 有提供常量...
 FILE_MAX_SIZE = 50
 HTTP_FILE_MAXSIZE = 5
+DONWLOAD_FILE_MAXSIZE = 10
 PER_MESSAGE_MAX_IMAGE_COUNT = 10
 
 
@@ -58,6 +59,8 @@ def get_file_size_type(url: str):
 
     if filesize < HTTP_FILE_MAXSIZE:
         return 'photo'
+    elif filesize < DONWLOAD_FILE_MAXSIZE:
+        return 'download'
     elif filesize > HTTP_FILE_MAXSIZE and filesize < FILE_MAX_SIZE:
         return 'document'
     elif filesize >= FILE_MAX_SIZE:
@@ -65,7 +68,12 @@ def get_file_size_type(url: str):
 
 
 def download_media(url: str):
-    return httpx.get(url, timeout=30).read()
+    headers = {}
+
+    if url.find('i.pximg.net') != -1:
+        headers['Referer'] = 'https://app-api.pixiv.net/'
+
+    return httpx.get(url, headers=headers, timeout=30).read()
 
 
 def get_media_list(urls: List[str], caption):
@@ -142,7 +150,9 @@ async def do_send_message(bot: Bot, chat_id: str, photos, reply_message_id: int 
     except BadRequest as e:
         exstr = str(e)
         errors = ['wrong file', 'wrong type',
-                  'photo_invalid_dimensions', 'failed to get http url content']
+                  'photo_invalid_dimensions', 
+                  'failed to get http url content',
+                  'image_process_failed']
 
         logger.info('Bad Request %s', e)
 
@@ -208,8 +218,11 @@ async def preprocess_message(message: ImageDB) -> List[str]:
         async with NSCrawler(nico_config.NICO_USER_SESS, proxy=PROXY) as crw:
             img_list = [await crw.get_source_url(message.original_id)]
     elif message.original_site == 'pixiv':
-        img_list = list(map(lambda url: url.replace(
-            'i.pximg.net', PIXIV_REVERSE_PROXY), message.pic_hash_list))
+        if PIXIV_REVERSE_PROXY:
+            img_list = list(map(lambda url: url.replace(
+                'i.pximg.net', PIXIV_REVERSE_PROXY), message.pic_hash_list))
+        else:
+            img_list = message.pic_hash_list
     else:
         img_list = message.pic_hash_list
 
