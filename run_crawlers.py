@@ -3,7 +3,7 @@
 """
 import asyncio
 
-from tortoise import Tortoise
+from tortoise import Tortoise, run_async
 
 from app.gelbooru import run as run_gel
 from app.nico import run as run_nico
@@ -33,18 +33,17 @@ funcs = {
 async def main():
     await init_db()
 
-    try:
-        for name, func in funcs.items():
-            print('=' * 30)
-            print(f'开始执行 {name} 爬虫')
+    for name, func in funcs.items():
+        print('=' * 30)
+        print(f'开始执行 {name} 爬虫')
+        try:
             async for img in func():
                 print(img)
-            print('=' * 30)
-            print()
-
-    finally:
-        await Tortoise.close_connections()
+        except Exception as e:
+            print(f'{name} 爬虫失败:', e)
+        print('=' * 30)
+        print()
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    run_async(main())
