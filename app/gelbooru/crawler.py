@@ -5,9 +5,10 @@ from aiohttp import TCPConnector
 
 
 class GelbooruCrawler(object):
-    def __init__(self, proxy: Optional[str] = ''):
+    def __init__(self, proxy: Optional[str] = '', api_key: Optional[str] = '', user_id: Optional[str] = ''):
         self.proxy = proxy
-
+        self.api_key = api_key
+        self.user_id = user_id
         self.session = aiohttp.ClientSession(connector=TCPConnector(ssl=False))
 
     async def __aenter__(self):
@@ -25,7 +26,9 @@ class GelbooruCrawler(object):
         params = {
             'tags': tags,
             'pid': page,
-            'limit': limit
+            'limit': limit,
+            'api_key': self.api_key,
+            'user_id': self.user_id
         }
 
         headers = {

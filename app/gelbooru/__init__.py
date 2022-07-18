@@ -18,7 +18,7 @@ async def run():
     if minute % REQ_INTERVAL != 0:
         return
 
-    async with GelbooruCrawler(proxy=PROXY) as crawler:
+    async with GelbooruCrawler(proxy=PROXY, api_key=API_KEY, user_id=USER_ID) as crawler:
         for tag in GELBOORU_TAGS:
             async for data in crawler.get_many_pages(tag, begin=0, end=GELBOORU_PAGE_NUM):
                 for item in data['post']:
