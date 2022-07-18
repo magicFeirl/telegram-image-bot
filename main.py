@@ -38,11 +38,22 @@ if PROXY:
     os.environ['HTTPS_PROXY'] = PROXY
 
 
+def get_headers(url: str):
+    headers = {}
+
+    if url.find('i.pximg.net') != -1:
+        headers['Referer'] = 'https://app-api.pixiv.net/'
+
+    return headers
+
+
 def get_filesizeMB(url: str):
     # 可以添加返回文件类型功能
     proxies = PROXY or None
+    headers = get_headers(url)
+
     try:
-        resp = httpx.head(url, proxies=proxies)
+        resp = httpx.head(url, headers=headers, proxies=proxies)
     except TimeoutError:
         logger.error('获取文件大小请求超时')
         return -1
@@ -68,10 +79,7 @@ def get_file_size_type(url: str):
 
 
 def download_media(url: str):
-    headers = {}
-
-    if url.find('i.pximg.net') != -1:
-        headers['Referer'] = 'https://app-api.pixiv.net/'
+    headers = get_headers(url)
 
     return httpx.get(url, headers=headers, timeout=30).read()
 
@@ -150,7 +158,7 @@ async def do_send_message(bot: Bot, chat_id: str, photos, reply_message_id: int 
     except BadRequest as e:
         exstr = str(e)
         errors = ['wrong file', 'wrong type',
-                  'photo_invalid_dimensions', 
+                  'photo_invalid_dimensions',
                   'failed to get http url content',
                   'image_process_failed']
 
