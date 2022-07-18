@@ -1,10 +1,10 @@
 ## Telegram 图片推送 bot
 
 **支持多种网站推送**
-* Pixiv
-* Nico Seiga
-* Twitter
-* Gelbooru
+- [Pixiv](https://www.pixiv.net/)
+- [Nico Seiga](http://seiga.nicovideo.jp/)
+- [Twitter](https://twitter.com/home)
+- [Gelbooru](https://gelbooru.com/)
 
 **其它功能**
 * 消息自动重发
