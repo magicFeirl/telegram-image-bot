@@ -34,7 +34,7 @@
 
 **推送前需要把bot加入到你的频道/群，也可以私聊推送，具体取决于传入的 chat id 是哪一种。**
 
-修改项目根目录的全局配置 `vim ~/config.py`
+修改项目根目录的全局配置 `vim config.py`
 
 ```python
 # bot token
@@ -68,7 +68,7 @@ GELBOORU_PAGE_NUM = 1
 # sample_url: 压缩图
 GELBOORU_IMAGE_QUALITY = 'file_url'  # or sample_url
 
-# 因为 Gelbooru 限制了 API 请求次数（目测是 110 次每天），所以需要减少请求次数
+# 因为 Gelbooru 限制了 API 请求次数（目测是 24 次每天），所以需要减少请求次数
 # 每隔多少分钟请求 Gelbooru，取值为 1 - 59
 REQ_INTERVAL = 20
 
