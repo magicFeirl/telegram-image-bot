@@ -40,7 +40,7 @@
 # bot token
 TOKEN = 'xxxx'
 
-# 消息发送失败的最大重试次数
+# 消息发送失败时的重试次数
 MESSAGE_MAX_RETRY = 12
 
 # group/user/channel id 列表
@@ -69,10 +69,12 @@ GELBOORU_PAGE_NUM = 1
 GELBOORU_IMAGE_QUALITY = 'file_url'  # or sample_url
 
 # 因为 Gelbooru 限制了 API 请求次数（目测是 24 次每天），所以需要减少请求次数
-# 每隔多少分钟请求 Gelbooru，取值为 1 - 59
+# 当前时间的分钟数 % REQ_INTERVAL == 0 的时候执行爬虫
+# e.g.: REQ_INTERVAL = 20，表示每个小时的 0、20、40 分钟会执行爬虫
+# 具体能不能执行取决于 cron 的执行时间
 REQ_INTERVAL = 20
 
-# API KEY
+# API KEY（可选；如果被限制请求频率使用 API_KEY 可解除）
 # 在 https://gelbooru.com/index.php?page=account&s=options 中
 API_KEY = ''
 USER_ID = ''
@@ -184,7 +186,16 @@ fi
 
 ```
 
+## 4. 配置本地 API server（可选）
+
+配置 TG 的本地 API server，可以把上传图片的大小提升至 2000MB，因此发送图片大于 10 MB 的消息时不会发送文件形式的图片。
+
+[官方地址](https://github.com/tdlib/telegram-bot-api) 中提供了安装方法，不过这里推荐用 docker 安装，更加方便且不会污染服务器环境。
+
+如果你还没安装 docker，去 [官方文档](https://docs.docker.com/) 找自己系统的安装方式，之后使用 [docker 镜像安装](https://hub.docker.com/r/aiogram/telegram-bot-api)，可以看到容器需要两个环境变量，具体的获取方式在文档中有写，需要注意申请 API Key 的时候关闭 AdBlock 之类的插件，以避免申请失败。
+
 ## TODOs
+
 1. 只发送发送失败的消息 - group message 发送失败视为整体发送失败
 2. 只有一张表
 3. 爬虫提供一个 yield 方法获取来获取数据
