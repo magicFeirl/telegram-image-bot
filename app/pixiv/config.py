@@ -1,7 +1,13 @@
 # 必须配置 PIXIV_TAGS 和 PIXIV_REFRESH_TOKEN，其他配置可默认
 
 # 推送图片的 tags
-PIXIV_TAGS = ['a', 'b']
+PIXIV_TAGS = [
+    'a', 
+    {
+        'tag': 'b',
+        'score': 1000
+    }
+]
 
 # refresh token
 # 获取方法：https://gist.github.com/ZipFile/c9ebedb224406f4f11845ab700124362

@@ -12,9 +12,15 @@ async def run():
     illust_list: List[Illust] = []
 
     async with PixivCrawler(PIXIV_REFRESH_TOKEN, PROXY) as crawler:
-        for tag in PIXIV_TAGS:
+        for tag_info in PIXIV_TAGS:
+            min_score = PIXIV_MIN_POST_SCORE
+            tag = tag_info
+            
+            if isinstance(tag_info, dict):
+                tag, min_score = tag_info['tag'], tag_info['score']
+
             async for illust in crawler.search_illust(tag, PIXIV_MAX_PAGE):
-                if illust.score >= PIXIV_MIN_POST_SCORE or (illust.user_id in PIXIV_USER_WHITELIST):
+                if illust.score >= min_score or (illust.user_id in PIXIV_USER_WHITELIST):
                     illust_list.append(illust)
 
         if PIXIV_FOLLOW:
